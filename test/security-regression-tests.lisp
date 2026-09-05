@@ -803,6 +803,52 @@
     (is (equalp (pure-tls::concat-octet-vectors first second)
                 (coerce buffer '(vector (unsigned-byte 8)))))))
 
+;;;; ---------------------------------------------------------------------------
+;;;; Finding: a keyword argument passed in place of the positional NOW is
+;;;; swallowed, the check the caller asked for never runs, and the resulting
+;;;; failure names neither the certificate nor the argument responsible.
+;;;;
+;;;; verify-certificate-chain takes NOW and HOSTNAME as positional &optional
+;;;; parameters ahead of its &key parameters, so
+;;;;   (verify-certificate-chain chain roots :check-revocation t)
+;;;; binds NOW to :CHECK-REVOCATION and HOSTNAME to T, leaving CHECK-REVOCATION
+;;;; NIL.  Revocation checking is not applied, and what the caller sees instead
+;;;; depends on the platform.  On Windows and macOS NOW is never read at all,
+;;;; but HOSTNAME is not inert there: both treat a non-NIL hostname as a string
+;;;; and hand it to a foreign string conversion (windows-verify.lisp
+;;;; cffi:with-foreign-string, macos-verify.lisp %cf-string-create, whose
+;;;; argument is declared :string), which rejects a non-string.  On other
+;;;; platforms NOW reaches the pure-Lisp validity checks and raises a bare
+;;;; TYPE-ERROR, not a TLS condition.
+;;;;
+;;;; Secure behaviour: a NOW that is not a universal time is rejected outright,
+;;;; ahead of the native dispatches, so the call fails in one place with an
+;;;; error that says what is wrong rather than failing differently per platform
+;;;; with the requested check quietly skipped.
+;;;; ---------------------------------------------------------------------------
+
+(test chain-verification-rejects-keyword-in-place-of-time
+  "A keyword argument landing on the positional NOW must be rejected, and a
+   correctly positioned call must be unaffected."
+  (let ((pure-tls:*use-windows-certificate-store* nil)
+        (pure-tls:*use-macos-keychain* nil)
+        (now (get-universal-time)))
+    (destructuring-bind (leaf inter)
+        (%pem-chain (test-cert-path "openssl/goodcn2-chain.pem"))
+      (let ((root (pure-tls:parse-certificate-from-file
+                   (test-cert-path "openssl/root-cert.pem"))))
+        ;; Baseline: with all four positionals supplied the chain verifies, so
+        ;; the rejection below is attributable solely to argument position.
+        (is (pure-tls::verify-certificate-chain (list leaf inter root) (list root)
+                                                now nil :trust-anchor-mode :replace)
+            "Untampered goodcn2 chain should verify")
+        ;; The keyword lands on NOW instead.  This must signal a certificate
+        ;; error naming the problem, rather than fail further in with an error
+        ;; about something else and revocation checking quietly disabled.
+        (signals pure-tls:tls-certificate-error
+          (pure-tls::verify-certificate-chain (list leaf inter root) (list root)
+                                              :check-revocation t))))))
+
 (defun run-security-regression-tests ()
   "Run the security regression suite.  Returns T if all tests pass."
   (format t "~&=== Running pure-tls Security Regression Tests ===~%~%")

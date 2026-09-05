@@ -330,6 +330,27 @@ a full list lives at https://publicsuffix.org/.")
    no EKU extension is treated as unrestricted (RFC 5280 s4.2.1.12).
    CRL fetch timeout is computed from cl-cancel:*current-cancel-context* if set."
   (declare (ignorable hostname check-revocation trust-anchor-mode))  ; Only used conditionally
+
+  ;; NOW and HOSTNAME are optional positional parameters ahead of the keywords, so
+  ;; a caller that goes straight to a keyword argument has it consumed as NOW:
+  ;; (verify-certificate-chain chain roots :check-revocation t) binds NOW to
+  ;; :CHECK-REVOCATION and HOSTNAME to T, and the requested check never runs.
+  ;; What the caller sees after that depends on the platform and on the swallowed
+  ;; value, and none of it names the certificate or the argument responsible.
+  ;; Rejecting the time here, ahead of the native dispatches, gives one condition
+  ;; that says what is wrong, and refuses the variant whose swallowed value is NIL
+  ;; that the native paths would otherwise verify cleanly with no sign an argument
+  ;; went astray.
+  (unless (realp now)
+    (error 'tls-certificate-error
+           :message (format nil
+                            (concatenate 'string
+                                         "Verification time must be a universal time, not ~S; "
+                                         "NOW and HOSTNAME are positional parameters and a "
+                                         "keyword argument passed in their place is silently "
+                                         "consumed.")
+                            now)))
+
   (when (null chain)
     (error 'tls-certificate-error :message "Empty certificate chain"))
 
