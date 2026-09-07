@@ -849,6 +849,45 @@
           (pure-tls::verify-certificate-chain (list leaf inter root) (list root)
                                               :check-revocation t))))))
 
+;;;; ---------------------------------------------------------------------------
+;;;; Finding: the same misplacement one position further along is worse, because
+;;;; it succeeds.  With a real time supplied for NOW,
+;;;;   (verify-certificate-chain chain roots now :check-revocation)
+;;;; binds HOSTNAME to :CHECK-REVOCATION and leaves CHECK-REVOCATION NIL.
+;;;; HOSTNAME is read only inside the Windows and macOS native dispatches, so on
+;;;; the pure-Lisp path the swallowed keyword is never looked at: the chain
+;;;; verifies to T and the revocation checking the caller asked for never runs.
+;;;; Nothing in the return value distinguishes that from a chain that really was
+;;;; checked for revocation.
+;;;;
+;;;; Secure behaviour: a HOSTNAME that is neither NIL nor a string is rejected
+;;;; alongside the time, so the misplaced argument fails loudly instead of
+;;;; producing a verification the caller will trust for more than it did.
+;;;; ---------------------------------------------------------------------------
+
+(test keyword-in-hostname-position-is-rejected
+  "A keyword argument landing on the positional HOSTNAME must be rejected, and a
+   correctly positioned call must be unaffected."
+  (let ((pure-tls:*use-windows-certificate-store* nil)
+        (pure-tls:*use-macos-keychain* nil)
+        (now (get-universal-time)))
+    (destructuring-bind (leaf inter)
+        (%pem-chain (test-cert-path "openssl/goodcn2-chain.pem"))
+      (let ((root (pure-tls:parse-certificate-from-file
+                   (test-cert-path "openssl/root-cert.pem"))))
+        ;; Baseline: with all four positionals supplied the chain verifies, so
+        ;; the rejection below is attributable solely to argument position.
+        (is (pure-tls::verify-certificate-chain (list leaf inter root) (list root)
+                                                now nil :trust-anchor-mode :replace)
+            "Untampered goodcn2 chain should verify")
+        ;; NOW is a genuine time here, so the time guard passes and the keyword
+        ;; lands on HOSTNAME instead.  The pure-Lisp path never reads HOSTNAME,
+        ;; so without a guard this call returns T with revocation checking
+        ;; silently skipped.
+        (signals pure-tls:tls-certificate-error
+          (pure-tls::verify-certificate-chain (list leaf inter root) (list root)
+                                              now :check-revocation))))))
+
 (defun run-security-regression-tests ()
   "Run the security regression suite.  Returns T if all tests pass."
   (format t "~&=== Running pure-tls Security Regression Tests ===~%~%")

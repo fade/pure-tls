@@ -351,6 +351,19 @@ a full list lives at https://publicsuffix.org/.")
                                          "consumed.")
                             now)))
 
+  ;; A keyword argument can also land one position further along, on HOSTNAME:
+  ;; (verify-certificate-chain chain roots now :check-revocation) passes the
+  ;; guard above with a genuine time, binds HOSTNAME to :CHECK-REVOCATION, and
+  ;; leaves CHECK-REVOCATION NIL.  HOSTNAME is read only by the Windows and
+  ;; macOS native dispatches, so on the pure-Lisp path nothing ever looks at the
+  ;; swallowed keyword and the call succeeds: the chain verifies to T while the
+  ;; revocation checking the caller asked for was never performed.  A silent
+  ;; success is the worst of the outcomes available here, and rejecting a
+  ;; HOSTNAME that is neither NIL nor a string is what closes it.
+  (unless (or (null hostname) (stringp hostname))
+    (error 'tls-certificate-error
+           :message (format nil "HOSTNAME must be a string or NIL, not ~S; NOW and HOSTNAME are positional parameters ahead of the keywords, so a keyword argument passed in their place is silently consumed and the keyword it names never takes effect." hostname)))
+
   (when (null chain)
     (error 'tls-certificate-error :message "Empty certificate chain"))
 
