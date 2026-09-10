@@ -1,0 +1,6 @@
+# Lisp sources must check out with LF endings on every platform: SBCL's
+# compile-time checking of literal FORMAT control strings (via FORMATTER)
+# rejects a carriage return after a tilde-newline continuation, so a CRLF
+# checkout breaks the build for any such string.
+*.lisp text eol=lf
+*.asd text eol=lf
