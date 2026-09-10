@@ -319,6 +319,10 @@ a full list lives at https://publicsuffix.org/.")
    TRUSTED-ROOTS is a list of trusted CA certificates. When NIL on Windows/macOS,
    native OS verification uses the system trust store.
    HOSTNAME is optional; if provided, enables hostname verification on native platforms.
+   NOW must be a universal time (a non-negative real) and HOSTNAME a string or
+   NIL; both are positional parameters ahead of the keywords, and a value of
+   the wrong type in either slot (such as a misplaced keyword argument)
+   signals TLS-CERTIFICATE-ERROR at entry rather than being silently consumed.
    CHECK-REVOCATION if T, checks certificate revocation via CRL/OCSP (default NIL).
    TRUST-ANCHOR-MODE controls how trusted-roots interact with system store:
      :replace (default) - Use ONLY trusted-roots, ignore system store
@@ -341,15 +345,14 @@ a full list lives at https://publicsuffix.org/.")
   ;; that says what is wrong, and refuses the variant whose swallowed value is NIL
   ;; that the native paths would otherwise verify cleanly with no sign an argument
   ;; went astray.
-  (unless (realp now)
+  (unless (and (realp now) (>= now 0))
     (error 'tls-certificate-error
            :message (format nil
-                            (concatenate 'string
-                                         "Verification time must be a universal time, not ~S; "
-                                         "NOW and HOSTNAME are positional parameters and a "
-                                         "keyword argument passed in their place is silently "
-                                         "consumed.")
-                            now)))
+                            "Verification time must be a universal time (a ~
+                             non-negative real), not ~S~:[~;; NOW and HOSTNAME ~
+                             are positional parameters and a keyword argument ~
+                             passed in their place is silently consumed~]."
+                            now (keywordp now))))
 
   ;; A keyword argument can also land one position further along, on HOSTNAME:
   ;; (verify-certificate-chain chain roots now :check-revocation) passes the
@@ -362,7 +365,13 @@ a full list lives at https://publicsuffix.org/.")
   ;; HOSTNAME that is neither NIL nor a string is what closes it.
   (unless (or (null hostname) (stringp hostname))
     (error 'tls-certificate-error
-           :message (format nil "HOSTNAME must be a string or NIL, not ~S; NOW and HOSTNAME are positional parameters ahead of the keywords, so a keyword argument passed in their place is silently consumed and the keyword it names never takes effect." hostname)))
+           :message (format nil
+                            "HOSTNAME must be a string or NIL, not ~S~:[~;; NOW ~
+                             and HOSTNAME are positional parameters ahead of the ~
+                             keywords, so a keyword argument passed in their ~
+                             place is silently consumed and the keyword it names ~
+                             never takes effect~]."
+                            hostname (keywordp hostname))))
 
   (when (null chain)
     (error 'tls-certificate-error :message "Empty certificate chain"))
